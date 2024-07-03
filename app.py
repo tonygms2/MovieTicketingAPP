@@ -1,6 +1,6 @@
 import os
 
-from flask import Flask, request, jsonify
+from flask import Flask, jsonify
 from flask_mysqldb import MySQL
 import requests
 from dotenv import load_dotenv
