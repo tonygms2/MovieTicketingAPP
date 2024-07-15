@@ -5,12 +5,16 @@ from random import randint
 
 from flask import Flask, jsonify,request
 from flask_mysqldb import MySQL
+from flask_bcrypt import Bcrypt
 import requests
 # from dotenv import load_dotenv
 #
 # load_dotenv()
 
+
 app = Flask(__name__)
+
+
 
 app.config['MYSQL_HOST'] = 'localhost'
 app.config['MYSQL_USER'] = 'root'
@@ -19,45 +23,47 @@ app.config['MYSQL_DB'] = 'movie_ticketing'
 
 mysql = MySQL(app)
 
-OMDB_API_KEY = 'f2e94d5b'
-
-movies_list = [
-    'The Shawshank Redemption', 'The Godfather', 'The Dark Knight', 'Pulp Fiction',
-    'Schindler\'s List', 'The Lord of the Rings: The Return of the King', 'Fight Club',
-    'Forrest Gump', 'Inception', 'The Matrix', 'Goodfellas', 'The Empire Strikes Back',
-    'The Silence of the Lambs', 'Saving Private Ryan', 'The Green Mile', 'Interstellar',
-    'Parasite', 'Gladiator', 'The Departed', 'The Prestige', 'Scarface', 'Paglu 2','The Big Bang Theory'
-]
-
-@app.route('/fetch_movies', methods=['GET'])
-def fetch_movies():
-    cursor = mysql.connection.cursor()
-
-    for movie in movies_list:
-        url = f'http://www.omdbapi.com/?t={movie}&apikey={OMDB_API_KEY}'
-        response = requests.get(url)
-        data = response.json()
-        if data['Response'] == 'True':
-            title = data.get('Title')
-            genre = data.get('Genre')
-            director = data.get('Director')
-            release_year = data.get('Year')
-            imdb_rating = data.get('imdbRating')
-            poster_url = data.get('Poster')
-            duration = data.get('Runtime')
-            description = data.get('Plot')
-            cursor.execute("""
-                INSERT INTO movies (title, genre, director, release_year, imdb_rating, poster_url, duration, description)
-                VALUES (%s, %s, %s, %s, %s, %s, %s,%s)
-                ON DUPLICATE KEY UPDATE
-                genre=VALUES(genre), director=VALUES(director), release_year=VALUES(release_year),
-                imdb_rating=VALUES(imdb_rating), poster_url=VALUES(poster_url), duration=VALUES(duration), description=VALUES(description)
-            """, (title, genre, director, release_year, imdb_rating, poster_url, duration, description))
-
-    mysql.connection.commit()
-    cursor.close()
-
-    return jsonify({"message": "Movies data inserted/updated successfully!"})
+bcrypt = Bcrypt(app)
+#region populate DB
+# OMDB_API_KEY = 'f2e94d5b'
+#
+# movies_list = [
+#     'The Shawshank Redemption', 'The Godfather', 'The Dark Knight', 'Pulp Fiction',
+#     'Schindler\'s List', 'The Lord of the Rings: The Return of the King', 'Fight Club',
+#     'Forrest Gump', 'Inception', 'The Matrix', 'Goodfellas', 'The Empire Strikes Back',
+#     'The Silence of the Lambs', 'Saving Private Ryan', 'The Green Mile', 'Interstellar',
+#     'Parasite', 'Gladiator', 'The Departed', 'The Prestige', 'Scarface', 'Paglu 2','The Big Bang Theory'
+# ]
+#
+# @app.route('/fetch_movies', methods=['GET'])
+# def fetch_movies():
+#     cursor = mysql.connection.cursor()
+#
+#     for movie in movies_list:
+#         url = f'http://www.omdbapi.com/?t={movie}&apikey={OMDB_API_KEY}'
+#         response = requests.get(url)
+#         data = response.json()
+#         if data['Response'] == 'True':
+#             title = data.get('Title')
+#             genre = data.get('Genre')
+#             director = data.get('Director')
+#             release_year = data.get('Year')
+#             imdb_rating = data.get('imdbRating')
+#             poster_url = data.get('Poster')
+#             duration = data.get('Runtime')
+#             description = data.get('Plot')
+#             cursor.execute("""
+#                 INSERT INTO movies (title, genre, director, release_year, imdb_rating, poster_url, duration, description)
+#                 VALUES (%s, %s, %s, %s, %s, %s, %s,%s)
+#                 ON DUPLICATE KEY UPDATE
+#                 genre=VALUES(genre), director=VALUES(director), release_year=VALUES(release_year),
+#                 imdb_rating=VALUES(imdb_rating), poster_url=VALUES(poster_url), duration=VALUES(duration), description=VALUES(description)
+#             """, (title, genre, director, release_year, imdb_rating, poster_url, duration, description))
+#
+#     mysql.connection.commit()
+#     cursor.close()
+#
+#     return jsonify({"message": "Movies data inserted/updated successfully!"})
 #endregion
 
 #region API ROUTES
@@ -73,6 +79,7 @@ def get_movies():
     for row in rows:
         print(row)
         movie = {
+            'id': row[0],
             'title': row[1],
             'genre': row[2],
             'director': row[8],
@@ -114,6 +121,81 @@ def book_tickets():
     mysql.connection.commit()
     cursor.close()
     return jsonify({'message': "Your booking has been successfully submitted!"})
+
+
+#Seat selection route
+@app.route('/seats/<int:showtime_id>', methods=['GET'])
+def get_seats(showtime_id):
+    cursor = mysql.connection.cursor()
+    cursor.execute("SELECT * FROM seats WHERE showtime_id = %s", (showtime_id,))
+    seats = cursor.fetchall()
+    cursor.close()
+
+    seats_list = []
+    for seat in seats:
+        seats_list.append({
+            "id": seat[0],
+            "showtime_id": seat[1],
+            "seat_number": seat[2],
+            "is_booked": seat[3]
+        })
+
+    return jsonify(seats_list)
+
+
+#registration
+
+
+
+
+@app.route('/register', methods=['POST'])
+def register():
+    data = request.get_json()
+    username = data['username']
+    password = data['password']
+    city = data['city']
+
+    hashed_password = bcrypt.generate_password_hash(password).decode('utf-8')
+
+    cursor = mysql.connection.cursor()
+    try:
+        cursor.execute("""
+            INSERT INTO users (username, password, city)
+            VALUES (%s, %s, %s)
+        """, (username, hashed_password, city))
+        mysql.connection.commit()
+    except mysql.connector.IntegrityError:
+        return jsonify({"message": "Username already exists."}), 400
+
+    cursor.close()
+    return jsonify({"message": "User registered successfully!"})
+
+
+from flask import jsonify, request
+
+@app.route('/login', methods=['POST'])
+def login():
+    data = request.get_json()
+    username = data['username']
+    password = data['password']
+
+    cursor = mysql.connection.cursor()
+    cursor.execute("SELECT * FROM users WHERE username = %s", (username,))
+    user = cursor.fetchone()
+    cursor.close()
+
+    if user and bcrypt.check_password_hash(user[2], password):
+        return jsonify({
+            "user_id": user[0],
+            "message": "Login successful!",
+            "isLoginSuccess": True  # Directly return True for success
+        })
+    else:
+        return jsonify({
+            "message": "Invalid username or password.",
+            "isLoginSuccess": False
+        }), 401
+
 
 # @app.route('/generate_showtimes', methods=['GET'])
 # def generate_showtimes():
