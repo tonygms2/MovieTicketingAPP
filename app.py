@@ -1,11 +1,11 @@
 from datetime import datetime,timedelta
 import os
 from random import randint
-
-
 from flask import Flask, jsonify,request
 from flask_mysqldb import MySQL
 from flask_bcrypt import Bcrypt
+from flask_cors import CORS
+import mysql.connector
 import requests
 # from dotenv import load_dotenv
 #
@@ -13,7 +13,7 @@ import requests
 
 
 app = Flask(__name__)
-
+CORS(app)
 
 
 app.config['MYSQL_HOST'] = 'localhost'
@@ -95,20 +95,39 @@ def get_movies():
 
 @app.route('/showtimes/<int:movie_id>', methods=['GET'])
 def get_showtimes(movie_id):
-    cursor = mysql.connection.cursor()
-    cursor.execute('SELECT * FROM showtimes WHERE movie_id = %s', (movie_id,))
-    showtimes = cursor.fetchall()
-    cursor.close()
-    showtimes_list = []
-    for showtime in showtimes:
-        showtimes_list.append({
-            "id": showtime[0],
-            "movie_id": showtime[1],
-            "showtime": showtime[2]
+    cursor = None
+    try:
+        cursor = mysql.connection.cursor()
+
+        # First, check if the movie exists
+        cursor.execute('SELECT title FROM movies WHERE id = %s', (movie_id,))
+        movie = cursor.fetchone()
+        if not movie:
+            return jsonify({"error": "Movie not found"}), 404
+
+        # Fetch showtimes
+        cursor.execute('SELECT id, movie_id, showtime FROM showtimes WHERE movie_id = %s', (movie_id,))
+        showtimes = cursor.fetchall()
+
+        showtimes_list = []
+        for showtime in showtimes:
+            showtimes_list.append({
+                "id": showtime[0],
+                "movie_id": showtime[1],
+                "showtime": showtime[2].strftime("%Y-%m-%d %H:%M:%S") if isinstance(showtime[2], datetime) else str(
+                    showtime[2])
+            })
+
+        return jsonify({
+            "movie_title": movie[0],
+            "showtimes": showtimes_list
         })
 
-    return jsonify(showtimes_list)
-
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        if cursor:
+            cursor.close()
 @app.route('/book', methods=['POST'])
 def book_tickets():
     data = request.get_json()
@@ -127,7 +146,7 @@ def book_tickets():
 @app.route('/seats/<int:showtime_id>', methods=['GET'])
 def get_seats(showtime_id):
     cursor = mysql.connection.cursor()
-    cursor.execute("SELECT * FROM seats WHERE showtime_id = %s", (showtime_id,))
+    cursor.execute("SELECT * FROM seats WHERE show_id = %s", (showtime_id,))
     seats = cursor.fetchall()
     cursor.close()
 
@@ -153,16 +172,16 @@ def register():
     data = request.get_json()
     username = data['username']
     password = data['password']
-    city = data['city']
+    mobile_number = data['mobile_number']
 
     hashed_password = bcrypt.generate_password_hash(password).decode('utf-8')
 
     cursor = mysql.connection.cursor()
     try:
         cursor.execute("""
-            INSERT INTO users (username, password, city)
+            INSERT INTO users (username, password, mobile_number)
             VALUES (%s, %s, %s)
-        """, (username, hashed_password, city))
+        """, (username, hashed_password, mobile_number))
         mysql.connection.commit()
     except mysql.connector.IntegrityError:
         return jsonify({"message": "Username already exists."}), 400
@@ -171,7 +190,7 @@ def register():
     return jsonify({"message": "User registered successfully!"})
 
 
-from flask import jsonify, request
+
 
 @app.route('/login', methods=['POST'])
 def login():
